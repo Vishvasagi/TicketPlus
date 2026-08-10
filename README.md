@@ -1,88 +1,120 @@
-# TicketPulse — Python (Flask) + PostgreSQL edition
+# TicketPulse — Python (Flask) + PostgreSQL, split into two services
 
-A staff daily-report tool: staff submit their pending ticket counts (and flag
-critical issues for the manager), managers get a dashboard, an updates feed,
-and a filterable consolidated report.
+TicketPulse is deployed as **two separate applications** that share one
+PostgreSQL database:
 
-This is a Python rewrite of the original Node.js version. The database
-schema and the `manager.html` / `staff.html` pages are unchanged; the backend
-is now **Flask** instead of Node/Express, and it talks to PostgreSQL with
-`psycopg2`.
+- **Staff service** (`staff_app.py`) — its own URL, only serves `staff.html`
+  and the routes staff need: viewing the staff list (to pick their name) and
+  submitting a daily report.
+- **Manager service** (`manager_app.py`) — its own URL, only serves
+  `manager.html` and the routes managers need: staff administration, the
+  dashboard, the updates feed, and the consolidated report.
+
+Neither service can reach the other's routes — the staff URL has no staff
+management endpoints, and the manager URL doesn't accept report submissions
+meant for staff. Both talk to the same `DATABASE_URL`, so anything staff
+submit shows up for managers immediately, and any staff member a manager
+adds is immediately selectable on the staff portal.
 
 ## What's in this folder
 
 ```
-app.py            Flask app: serves the front end + JSON API under /api/*
-migrate.py         Applies database.sql (safe to re-run — uses IF NOT EXISTS)
-database.sql        PostgreSQL schema (staff, daily_reports, report_items)
-requirements.txt   Python dependencies
-.env.example        Copy to .env and set DATABASE_URL
-render.yaml          Blueprint for a free Render deployment
-public/
-  manager.html        Manager portal
-  staff.html            Staff portal
-  app.css                Shared stylesheet
-  manager.js             Manager portal logic (calls /api/*)
-  staff.js                 Staff portal logic (calls /api/*)
+common/
+  db.py                Shared Postgres connection pool + helpers (used by both apps)
+staff_app.py            Flask app for the staff service
+manager_app.py           Flask app for the manager service
+migrate.py                Applies database.sql (safe to re-run)
+database.sql                PostgreSQL schema (staff, daily_reports, report_items)
+requirements.txt           Python dependencies (shared by both services)
+.env.example                 Copy to .env and set DATABASE_URL
+render.yaml                    Render Blueprint: 1 database + 2 web services
+public_staff/
+  staff.html                   Staff portal page
+  staff.js                       Staff portal logic
+  app.css                          Shared stylesheet
+public_manager/
+  manager.html                  Manager portal page
+  manager.js                      Manager portal logic
+  app.css                           Shared stylesheet (same file, copied per service)
 ```
 
 ## Local setup
 
-1. Create a PostgreSQL database named `ticketpulse` (or use a managed
-   provider such as Supabase, Neon, AWS RDS, or Render PostgreSQL).
-2. Copy `.env.example` to `.env` and set `DATABASE_URL`.
-3. Install dependencies:
+1. Create a PostgreSQL database (e.g. `ticketpulse`) and set `DATABASE_URL`
+   in a `.env` file (copy `.env.example`).
+2. Install dependencies (shared by both apps):
    ```
    pip install -r requirements.txt
    ```
-4. Apply the schema:
+3. Apply the schema once:
    ```
    python migrate.py
    ```
-5. Start the app:
+4. Run each service — pick different ports since they'll run side by side:
    ```
-   python app.py
+   PORT=3000 python staff_app.py
+   PORT=4000 python manager_app.py
    ```
-6. Open `http://localhost:3000/staff.html` or `http://localhost:3000/manager.html`.
+5. Open:
+   - `http://localhost:3000/` or `/staff.html` for the staff portal
+   - `http://localhost:4000/` or `/manager.html` for the manager portal
 
-For production, run it behind gunicorn instead of the Flask dev server:
-```
-gunicorn app:app --bind 0.0.0.0:$PORT
-```
+## Free Render deployment (two services)
 
-## Free Render deployment
-
-This repository includes `render.yaml`, which creates both the Python web
-service and a Render PostgreSQL database.
+`render.yaml` defines one Render PostgreSQL database plus two web services,
+`ticketpulse-staff` and `ticketpulse-manager`, both wired to the same
+`DATABASE_URL`.
 
 1. Push this folder to your GitHub repository.
-2. Create or sign in to a [Render account](https://render.com/).
-3. In Render, select **New → Blueprint**, connect the GitHub repository, and
-   select `render.yaml`.
-4. Confirm the service and database, both on the **Free** plan, then click
-   **Apply**.
-5. When the deployment completes, open the service URL shown by Render:
-   - `/manager.html` for managers
-   - `/staff.html` for staff
+2. In Render, select **New → Blueprint**, connect the repository, and select
+   `render.yaml`.
+3. Confirm the database and both services (all on the **Free** plan), then
+   click **Apply**.
+4. Render will give you two separate URLs when the deploy finishes, e.g.:
+   - `https://ticketpulse-staff.onrender.com` → staff portal
+   - `https://ticketpulse-manager.onrender.com` → manager portal
+   Share the staff link with your team and keep the manager link for
+   managers only.
 
-The build command installs dependencies and runs `migrate.py`, which applies
-`database.sql` against the Render PostgreSQL database on every deploy.
+The staff service's build command runs `python migrate.py`, applying
+`database.sql` to the shared database. Only one service needs to run the
+migration — it's harmless if both do, since the schema uses
+`IF NOT EXISTS`.
 
 > Important: Render's free PostgreSQL database is a trial/pilot option. It
 > expires after 30 days and has no backups. Export the data before expiry or
 > upgrade to a paid database for any live business use.
 
+## Deploying manually (not via Blueprint)
+
+If you create the two web services by hand instead of using the Blueprint,
+set these explicitly for each — this is the most common source of deploy
+failures:
+
+| Setting | Staff service | Manager service |
+|---|---|---|
+| Build Command | `pip install -r requirements.txt && python migrate.py` | `pip install -r requirements.txt` |
+| Start Command | `gunicorn staff_app:app --bind 0.0.0.0:$PORT` | `gunicorn manager_app:app --bind 0.0.0.0:$PORT` |
+| `DATABASE_URL` | same Postgres connection string | same Postgres connection string |
+| `PYTHON_VERSION` | `3.11.9` (avoids psycopg2-binary wheel issues on newer Python) | `3.11.9` |
+
 ## API summary
 
-| Method | Path                | Purpose |
+**Staff service** (`staff_app.py`)
+| Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/staff` | List active staff (`?all=1` includes inactive) |
-| POST | `/api/staff` | Add a staff member `{ full_name, role_title }` |
-| PATCH | `/api/staff/<id>` | Set `{ active: true/false }` |
-| POST | `/api/reports` | Submit a daily report `{ staff_id, report_date, is_critical, manager_remark, follow_up_date, tasks: [{task_name, pending_count}] }` |
-| GET | `/api/dashboard` | Active staff count, today's updates, today's critical count, open critical list |
-| GET | `/api/updates` | Most recent 100 daily reports with their task items |
+| GET | `/api/staff` | List active staff, for the "who are you" dropdown |
+| POST | `/api/reports` | Submit a daily report |
+
+**Manager service** (`manager_app.py`)
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/staff` | List staff (`?all=1` includes inactive) |
+| POST | `/api/staff` | Add a staff member |
+| PATCH | `/api/staff/<id>` | Activate/deactivate a staff member |
+| GET | `/api/dashboard` | Today's metrics + open critical escalations |
+| GET | `/api/updates` | Most recent 100 daily reports |
 | GET | `/api/reports?date=&staff_id=` | Consolidated, filterable report list + totals |
 
 Do not put database passwords in the HTML or JavaScript files — everything
-sensitive stays in `DATABASE_URL` on the server side.
+sensitive stays in `DATABASE_URL` on each service's server side.

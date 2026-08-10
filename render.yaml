@@ -4,12 +4,30 @@ databases:
     postgresMajorVersion: 16
 
 services:
+  # Staff portal — its own URL, only exposes the staff-facing routes.
+  # Its build runs the schema migration once, since it happens to build first.
   - type: web
-    name: ticketpulse
+    name: ticketpulse-staff
     runtime: python
     plan: free
     buildCommand: "pip install -r requirements.txt && python migrate.py"
-    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT"
+    startCommand: "gunicorn staff_app:app --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ticketpulse-db
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  # Manager portal — its own URL, only exposes the manager-facing routes.
+  # Shares the same database as the staff service above.
+  - type: web
+    name: ticketpulse-manager
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn manager_app:app --bind 0.0.0.0:$PORT"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
