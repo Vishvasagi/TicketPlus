@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS daily_reports (
 -- One row per status the staff member reported that day. Each row can be
 -- marked critical individually (previously this was one flag per whole
 -- report — now it's per status line).
-CREATE TABLE IF NOT EXISTS report_items (
+DROP TABLE IF EXISTS report_items CASCADE;
+
+CREATE TABLE report_items (
   id BIGSERIAL PRIMARY KEY,
   report_id BIGINT NOT NULL REFERENCES daily_reports(id) ON DELETE CASCADE,
   status_id BIGINT NOT NULL REFERENCES ticket_statuses(id),
