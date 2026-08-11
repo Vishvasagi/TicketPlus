@@ -1,1 +1,43 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TicketPulse | Staff</title><link rel="stylesheet" href="app.css"></head><body><div class="app"><header><div class="brand"><b><i>✓</i>TicketPulse</b><span class="role">STAFF PORTAL</span></div><div class="title"><h1>Daily task update</h1><p>Send your current pending work and any manager escalation.</p></div></header><main class="content"><div id="notice"></div><form class="card" id="reportForm"><h2>Submit today’s work</h2><p class="help">This update is sent directly to the manager dashboard.</p><div class="two"><div class="field"><label>Staff member</label><select id="staffId" required></select></div><div class="field"><label>Report date</label><input id="reportDate" type="date" required></div></div><div class="section"><h2>Pending tasks</h2><button class="outline" type="button" id="addTask">+ Add task</button></div><div id="tasks"></div><label class="toggle"><input type="checkbox" id="critical"> Mark as critical — needs manager follow-up</label><div class="conditional" id="criticalFields"><div class="two"><div class="field"><label>Follow-up target date</label><input id="followDate" type="date"></div><div class="field"><label>Remark for manager</label><textarea id="remark" placeholder="Explain the blocker or escalation."></textarea></div></div></div><div class="actions"><span></span><button class="primary">Send update</button></div></form></main></div><script src="staff.js"></script></body></html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TicketPulse | Staff</title><link rel="stylesheet" href="app.css"></head><body>
+
+<div class="app" id="loginScreen">
+  <header>
+    <div class="brand"><b><i>✓</i>TicketPulse</b><span class="role">STAFF PORTAL</span></div>
+    <div class="title"><h1>Sign in</h1><p>Use the username and password your manager set up for you.</p></div>
+  </header>
+  <form class="card" id="loginForm" style="max-width:360px">
+    <div id="loginNotice"></div>
+    <div class="field"><label>Username</label><input id="loginUsername" required autocomplete="username"></div>
+    <div class="field"><label>Password</label><input id="loginPassword" type="password" required autocomplete="current-password"></div>
+    <div class="actions"><span></span><button class="primary">Sign in</button></div>
+  </form>
+</div>
+
+<div class="app" id="appContainer" style="display:none">
+<header>
+  <div class="brand"><b><i>✓</i>TicketPulse</b><span class="role">STAFF PORTAL</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:10px">
+      <span id="whoami" class="help" style="margin:0"></span>
+      <button class="outline" id="logoutBtn" type="button">Log out</button>
+    </span>
+  </div>
+  <div class="title"><h1>Daily task update</h1><p>Send your current pending work by status, and flag anything critical.</p></div>
+</header>
+<main class="content">
+<div id="notice"></div>
+<form class="card" id="reportForm">
+  <h2>Submit today's work</h2>
+  <p class="help">This update is sent directly to the manager dashboard.</p>
+
+  <div class="field"><label>Report date</label><input id="reportDate" type="date" required></div>
+
+  <div class="section"><h2>Statuses</h2><button class="outline" type="button" id="addStatus">+ Add status</button></div>
+  <div id="statuses"></div>
+
+  <div class="actions"><span></span><button class="primary">Send update</button></div>
+</form>
+</main>
+</div>
+
+<script src="staff.js"></script>
+</body></html>

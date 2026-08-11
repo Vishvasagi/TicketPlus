@@ -1,120 +1,144 @@
-# TicketPulse — Python (Flask) + PostgreSQL, split into two services
+# TicketPulse — Python (Flask) + PostgreSQL, two services with login
 
 TicketPulse is deployed as **two separate applications** that share one
 PostgreSQL database:
 
-- **Staff service** (`staff_app.py`) — its own URL, only serves `staff.html`
-  and the routes staff need: viewing the staff list (to pick their name) and
-  submitting a daily report.
-- **Manager service** (`manager_app.py`) — its own URL, only serves
-  `manager.html` and the routes managers need: staff administration, the
-  dashboard, the updates feed, and the consolidated report.
+- **Staff service** (`staff_app.py`) — staff log in with credentials their
+  manager creates, then submit a daily report made of one or more **status**
+  lines (drawn from the manager's ticket status list), each with its own
+  pending count and its own optional critical flag.
+- **Manager service** (`manager_app.py`) — manager logs in, and can:
+  - manage **departments**
+  - manage the **ticket status** list staff pick from
+  - add / edit / deactivate / **delete** staff, assign them to a department
+  - **reset a staff member's password**
+  - view the dashboard, updates feed, and a filterable consolidated report
 
-Neither service can reach the other's routes — the staff URL has no staff
-management endpoints, and the manager URL doesn't accept report submissions
-meant for staff. Both talk to the same `DATABASE_URL`, so anything staff
-submit shows up for managers immediately, and any staff member a manager
-adds is immediately selectable on the staff portal.
+Both services connect to the same `DATABASE_URL`; each has its own login
+session and only exposes the routes relevant to that portal.
+
+## What changed from the single-report-line version
+
+- **Departments**: new master list, assignable to staff.
+- **Ticket statuses**: new master list, managed by the manager, replacing
+  the old freeform "task name" field on the staff form. The staff form is
+  now **"Add status"** instead of "Add task."
+- **Per-status critical flag**: critical is now marked on each status line
+  individually (with its own remark + follow-up date), instead of one
+  critical flag for the whole daily report.
+- **Login**: both staff and managers now sign in with a username/password
+  instead of picking a name from a dropdown / having no auth at all.
+- **Manager can edit and delete staff**, not just deactivate them, and can
+  **reset a staff member's password**.
+
+> **This is a breaking schema change.** If you have an existing database
+> from the earlier version, either point `DATABASE_URL` at a **fresh**
+> database, or manually migrate your data — `database.sql` no longer
+> matches the old table shapes (`report_items.task_name` is gone, replaced
+> by `status_id`; `daily_reports.is_critical` etc. moved to `report_items`).
 
 ## What's in this folder
 
 ```
 common/
-  db.py                Shared Postgres connection pool + helpers (used by both apps)
-staff_app.py            Flask app for the staff service
-manager_app.py           Flask app for the manager service
-migrate.py                Applies database.sql (safe to re-run)
-database.sql                PostgreSQL schema (staff, daily_reports, report_items)
-requirements.txt           Python dependencies (shared by both services)
-.env.example                 Copy to .env and set DATABASE_URL
-render.yaml                    Render Blueprint: 1 database + 2 web services
+  db.py                  Shared Postgres connection pool + helpers
+  auth.py                  Password hashing + login-required decorator
+staff_app.py               Flask app for the staff service
+manager_app.py                Flask app for the manager service
+migrate.py                      Applies database.sql + seeds a default manager account
+database.sql                       PostgreSQL schema
+requirements.txt                  Python dependencies (shared)
+.env.example                         Copy to .env and fill in
+render.yaml                             Render Blueprint: 1 database + 2 web services
 public_staff/
-  staff.html                   Staff portal page
-  staff.js                       Staff portal logic
-  app.css                          Shared stylesheet
+  staff.html, staff.js, app.css
 public_manager/
-  manager.html                  Manager portal page
-  manager.js                      Manager portal logic
-  app.css                           Shared stylesheet (same file, copied per service)
+  manager.html, manager.js, app.css
 ```
 
 ## Local setup
 
-1. Create a PostgreSQL database (e.g. `ticketpulse`) and set `DATABASE_URL`
-   in a `.env` file (copy `.env.example`).
-2. Install dependencies (shared by both apps):
+1. Create a PostgreSQL database and set `DATABASE_URL` in `.env` (copy
+   `.env.example`). Also set `SECRET_KEY` to any random string.
+2. Install dependencies:
    ```
    pip install -r requirements.txt
    ```
-3. Apply the schema once:
+3. Apply the schema and seed the first manager account:
    ```
    python migrate.py
    ```
-4. Run each service — pick different ports since they'll run side by side:
+   This prints a username/password if no manager account exists yet —
+   **copy it down, it's only shown once.** Or set
+   `DEFAULT_MANAGER_USERNAME` / `DEFAULT_MANAGER_PASSWORD` in `.env` before
+   running it to choose your own.
+4. Run each service on a different port:
    ```
    PORT=3000 python staff_app.py
    PORT=4000 python manager_app.py
    ```
-5. Open:
-   - `http://localhost:3000/` or `/staff.html` for the staff portal
-   - `http://localhost:4000/` or `/manager.html` for the manager portal
+5. Open `http://localhost:4000/manager.html`, log in, then:
+   - Add at least one **ticket status** (Statuses tab)
+   - Add a **department** (optional)
+   - Add a **staff member** — you'll get their username and an
+     auto-generated password (shown once) to give them
+6. Open `http://localhost:3000/staff.html` and log in as that staff member
+   to submit a report.
 
 ## Free Render deployment (two services)
 
-`render.yaml` defines one Render PostgreSQL database plus two web services,
-`ticketpulse-staff` and `ticketpulse-manager`, both wired to the same
-`DATABASE_URL`.
+`render.yaml` defines one Render PostgreSQL database plus the two web
+services, both wired to the same `DATABASE_URL`, each with an
+auto-generated `SECRET_KEY`.
 
 1. Push this folder to your GitHub repository.
-2. In Render, select **New → Blueprint**, connect the repository, and select
-   `render.yaml`.
-3. Confirm the database and both services (all on the **Free** plan), then
-   click **Apply**.
-4. Render will give you two separate URLs when the deploy finishes, e.g.:
-   - `https://ticketpulse-staff.onrender.com` → staff portal
-   - `https://ticketpulse-manager.onrender.com` → manager portal
-   Share the staff link with your team and keep the manager link for
-   managers only.
+2. In Render, **New → Blueprint**, connect the repo, select `render.yaml`.
+3. Confirm the database and both services (Free plan), click **Apply**.
+4. Once deployed, open the **staff service's build logs** and look for the
+   default manager credentials block — copy that password down immediately.
+5. Log in to the manager URL, set up statuses/departments/staff, then share
+   the staff URL with your team.
 
-The staff service's build command runs `python migrate.py`, applying
-`database.sql` to the shared database. Only one service needs to run the
-migration — it's harmless if both do, since the schema uses
-`IF NOT EXISTS`.
-
-> Important: Render's free PostgreSQL database is a trial/pilot option. It
-> expires after 30 days and has no backups. Export the data before expiry or
-> upgrade to a paid database for any live business use.
+> Render's free PostgreSQL database expires after 30 days with no backups.
+> Export data or upgrade before then for real use.
 
 ## Deploying manually (not via Blueprint)
-
-If you create the two web services by hand instead of using the Blueprint,
-set these explicitly for each — this is the most common source of deploy
-failures:
 
 | Setting | Staff service | Manager service |
 |---|---|---|
 | Build Command | `pip install -r requirements.txt && python migrate.py` | `pip install -r requirements.txt` |
 | Start Command | `gunicorn staff_app:app --bind 0.0.0.0:$PORT` | `gunicorn manager_app:app --bind 0.0.0.0:$PORT` |
 | `DATABASE_URL` | same Postgres connection string | same Postgres connection string |
-| `PYTHON_VERSION` | `3.11.9` (avoids psycopg2-binary wheel issues on newer Python) | `3.11.9` |
+| `SECRET_KEY` | any random string | any random string (can differ per service — sessions aren't shared between them) |
+| `PYTHON_VERSION` | `3.11.9` | `3.11.9` |
 
 ## API summary
 
-**Staff service** (`staff_app.py`)
+**Staff service** — all routes except `/api/auth/*` require a staff session.
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/staff` | List active staff, for the "who are you" dropdown |
-| POST | `/api/reports` | Submit a daily report |
+| POST | `/api/auth/login` | `{ username, password }` |
+| POST | `/api/auth/logout` | |
+| GET | `/api/auth/me` | Current logged-in staff member |
+| GET | `/api/statuses` | Active ticket statuses to choose from |
+| POST | `/api/reports` | `{ report_date, items: [{status_id, pending_count, is_critical, manager_remark, follow_up_date}] }` |
 
-**Manager service** (`manager_app.py`)
+**Manager service** — all routes except `/api/auth/login` require a manager session.
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/staff` | List staff (`?all=1` includes inactive) |
-| POST | `/api/staff` | Add a staff member |
-| PATCH | `/api/staff/<id>` | Activate/deactivate a staff member |
-| GET | `/api/dashboard` | Today's metrics + open critical escalations |
-| GET | `/api/updates` | Most recent 100 daily reports |
-| GET | `/api/reports?date=&staff_id=` | Consolidated, filterable report list + totals |
+| POST | `/api/auth/login` / `logout` / `GET /me` | |
+| POST | `/api/auth/change-password` | `{ new_password }` for the logged-in manager |
+| GET/POST | `/api/departments` | List / create |
+| PATCH/DELETE | `/api/departments/<id>` | Rename, activate/deactivate, or delete |
+| GET/POST | `/api/statuses` | List / create ticket statuses |
+| PATCH/DELETE | `/api/statuses/<id>` | Rename, activate/deactivate, or delete |
+| GET/POST | `/api/staff` | List (`?all=1` includes inactive) / create |
+| PATCH | `/api/staff/<id>` | Edit name/role/department/active |
+| DELETE | `/api/staff/<id>` | Permanently delete (cascades their reports — deactivate instead to keep history) |
+| POST | `/api/staff/<id>/reset-password` | `{ new_password? }` — omit to auto-generate |
+| GET | `/api/dashboard` | Today's metrics + open critical items |
+| GET | `/api/updates` | Most recent 100 reports |
+| GET | `/api/reports?date=&staff_id=` | Consolidated, filterable report + totals |
 
-Do not put database passwords in the HTML or JavaScript files — everything
-sensitive stays in `DATABASE_URL` on each service's server side.
+Passwords are hashed with Werkzeug's PBKDF2 implementation before storage —
+plaintext passwords are never saved to the database.

@@ -58,14 +58,23 @@ def attach_items(cur, reports):
         return reports
     ids = [r["id"] for r in reports]
     cur.execute(
-        "SELECT report_id, task_name, pending_count FROM report_items "
-        "WHERE report_id = ANY(%s) ORDER BY id",
+        "SELECT ri.id, ri.report_id, ri.pending_count, ri.is_critical, "
+        "ri.manager_remark, ri.follow_up_date, ts.name AS status_name "
+        "FROM report_items ri LEFT JOIN ticket_statuses ts ON ts.id = ri.status_id "
+        "WHERE ri.report_id = ANY(%s) ORDER BY ri.id",
         (ids,),
     )
     items_by_report = {}
     for row in cur.fetchall():
         items_by_report.setdefault(row["report_id"], []).append(
-            {"task_name": row["task_name"], "pending_count": row["pending_count"]}
+            {
+                "id": row["id"],
+                "status_name": row["status_name"],
+                "pending_count": row["pending_count"],
+                "is_critical": row["is_critical"],
+                "manager_remark": row["manager_remark"],
+                "follow_up_date": to_iso(row["follow_up_date"]),
+            }
         )
     for r in reports:
         r["items"] = items_by_report.get(r["id"], [])

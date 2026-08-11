@@ -1,16 +1,27 @@
 (() => {
+  const loginScreen = document.getElementById('loginScreen');
+  const appContainer = document.getElementById('appContainer');
+  const loginForm = document.getElementById('loginForm');
+  const loginNotice = document.getElementById('loginNotice');
+  const loginUsername = document.getElementById('loginUsername');
+  const loginPassword = document.getElementById('loginPassword');
+  const logoutBtn = document.getElementById('logoutBtn');
+  const whoami = document.getElementById('whoami');
+
   const notice = document.getElementById('notice');
-  const staffSelect = document.getElementById('staffId');
   const reportDate = document.getElementById('reportDate');
-  const tasksWrap = document.getElementById('tasks');
-  const addTaskBtn = document.getElementById('addTask');
-  const criticalCheckbox = document.getElementById('critical');
-  const criticalFields = document.getElementById('criticalFields');
-  const followDate = document.getElementById('followDate');
-  const remark = document.getElementById('remark');
+  const statusesWrap = document.getElementById('statuses');
+  const addStatusBtn = document.getElementById('addStatus');
   const form = document.getElementById('reportForm');
 
-  let taskSeq = 0;
+  let statusOptions = [];
+  let rowSeq = 0;
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
 
   function todayISO() {
     const d = new Date();
@@ -18,79 +29,147 @@
     return new Date(d - tz).toISOString().slice(0, 10);
   }
 
-  function showNotice(message, type) {
-    notice.innerHTML = `<div class="notice ${type}">${escapeHtml(message)}</div>`;
-    notice.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  function showNotice(el, message, type) {
+    el.innerHTML = `<div class="notice ${type}">${escapeHtml(message)}</div>`;
   }
 
-  function clearNotice() {
-    notice.innerHTML = '';
-  }
+  // ---------------- Auth ----------------
 
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  function addTaskRow(name = '', count = '') {
-    taskSeq += 1;
-    const id = `task-${taskSeq}`;
-    const row = document.createElement('div');
-    row.className = 'task-row';
-    row.dataset.id = id;
-    row.innerHTML = `
-      <input type="text" class="task-name" placeholder="e.g. Refund requests" value="${escapeHtml(name)}">
-      <input type="text" inputmode="numeric" class="task-count" placeholder="Pending #" value="${escapeHtml(String(count))}">
-      <button type="button" class="remove-task" aria-label="Remove task">&times;</button>
-    `;
-    row.querySelector('.remove-task').addEventListener('click', () => row.remove());
-    tasksWrap.appendChild(row);
-  }
-
-  async function loadStaff() {
+  async function checkSession() {
     try {
-      const res = await fetch('/api/staff');
-      if (!res.ok) throw new Error('Failed to load staff list.');
-      const staff = await res.json();
-      staffSelect.innerHTML = '<option value="" disabled selected>Select your name</option>' +
-        staff.map(s => `<option value="${s.id}">${escapeHtml(s.full_name)} — ${escapeHtml(s.role_title)}</option>`).join('');
-      if (staff.length === 0) {
-        staffSelect.innerHTML = '<option value="" disabled selected>No staff set up yet — ask your manager</option>';
-      }
-    } catch (err) {
-      showNotice('Could not load the staff list. Refresh to try again.', 'error');
+      const res = await fetch('/api/auth/me');
+      if (!res.ok) throw new Error();
+      const me = await res.json();
+      showApp(me);
+    } catch {
+      showLogin();
     }
   }
 
-  criticalCheckbox.addEventListener('change', () => {
-    criticalFields.classList.toggle('open', criticalCheckbox.checked);
-    followDate.required = criticalCheckbox.checked;
-    remark.required = criticalCheckbox.checked;
+  function showApp(me) {
+    loginScreen.style.display = 'none';
+    appContainer.style.display = '';
+    whoami.textContent = `${me.full_name} · ${me.role_title || ''}`;
+    reportDate.value = todayISO();
+    statusesWrap.innerHTML = '';
+    loadStatuses().then(() => addStatusRow());
+  }
+
+  function showLogin() {
+    appContainer.style.display = 'none';
+    loginScreen.style.display = '';
+  }
+
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loginNotice.innerHTML = '';
+    const btn = loginForm.querySelector('.primary');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername.value.trim(), password: loginPassword.value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not sign in.');
+      loginPassword.value = '';
+      showApp(data);
+    } catch (err) {
+      showNotice(loginNotice, err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
   });
 
-  addTaskBtn.addEventListener('click', () => addTaskRow());
+  logoutBtn.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    showLogin();
+  });
+
+  // ---------------- Statuses / report rows ----------------
+
+  async function loadStatuses() {
+    try {
+      const res = await fetch('/api/statuses');
+      if (!res.ok) throw new Error();
+      statusOptions = await res.json();
+    } catch {
+      statusOptions = [];
+      showNotice(notice, 'Could not load ticket statuses. Refresh to try again.', 'error');
+    }
+  }
+
+  function statusOptionsHtml(selected) {
+    if (statusOptions.length === 0) {
+      return '<option value="" disabled selected>No statuses set up — ask your manager</option>';
+    }
+    return '<option value="" disabled' + (selected ? '' : ' selected') + '>Select a status</option>' +
+      statusOptions.map(s => `<option value="${s.id}" ${String(s.id) === String(selected) ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+  }
+
+  function addStatusRow() {
+    rowSeq += 1;
+    const id = `row-${rowSeq}`;
+    const row = document.createElement('div');
+    row.className = 'card';
+    row.dataset.id = id;
+    row.style.padding = '14px';
+    row.innerHTML = `
+      <div class="task-row" style="grid-template-columns:1fr 110px 32px;margin-bottom:8px">
+        <select class="status-select">${statusOptionsHtml()}</select>
+        <input type="text" inputmode="numeric" class="status-count" placeholder="Pending #">
+        <button type="button" class="remove-row" aria-label="Remove status">&times;</button>
+      </div>
+      <label class="toggle" style="margin:6px 0">
+        <input type="checkbox" class="status-critical"> Mark this status as critical — needs manager follow-up
+      </label>
+      <div class="conditional critical-fields">
+        <div class="two">
+          <div class="field"><label>Follow-up target date</label><input type="date" class="status-followup"></div>
+          <div class="field"><label>Remark for manager</label><textarea class="status-remark" placeholder="Explain the blocker or escalation."></textarea></div>
+        </div>
+      </div>
+    `;
+
+    row.querySelector('.remove-row').addEventListener('click', () => row.remove());
+
+    const criticalCheckbox = row.querySelector('.status-critical');
+    const criticalFields = row.querySelector('.critical-fields');
+    const followup = row.querySelector('.status-followup');
+    const remark = row.querySelector('.status-remark');
+
+    criticalCheckbox.addEventListener('change', () => {
+      criticalFields.classList.toggle('open', criticalCheckbox.checked);
+      followup.required = criticalCheckbox.checked;
+      remark.required = criticalCheckbox.checked;
+    });
+
+    statusesWrap.appendChild(row);
+  }
+
+  addStatusBtn.addEventListener('click', () => addStatusRow());
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    clearNotice();
+    notice.innerHTML = '';
 
-    const tasks = Array.from(tasksWrap.querySelectorAll('.task-row')).map(row => ({
-      task_name: row.querySelector('.task-name').value.trim(),
-      pending_count: parseInt(row.querySelector('.task-count').value, 10) || 0,
-    })).filter(t => t.task_name);
+    const items = Array.from(statusesWrap.querySelectorAll('.card')).map(row => ({
+      status_id: row.querySelector('.status-select').value,
+      pending_count: parseInt(row.querySelector('.status-count').value, 10) || 0,
+      is_critical: row.querySelector('.status-critical').checked,
+      manager_remark: row.querySelector('.status-remark').value.trim(),
+      follow_up_date: row.querySelector('.status-followup').value || null,
+    })).filter(i => i.status_id);
 
-    const payload = {
-      staff_id: staffSelect.value,
-      report_date: reportDate.value,
-      is_critical: criticalCheckbox.checked,
-      manager_remark: remark.value.trim(),
-      follow_up_date: followDate.value || null,
-      tasks,
-    };
+    if (items.length === 0) {
+      showNotice(notice, 'Add at least one status before sending.', 'error');
+      return;
+    }
 
-    if (!payload.staff_id) {
-      showNotice('Choose your name before sending the update.', 'error');
+    const missingCritical = items.find(i => i.is_critical && (!i.manager_remark || !i.follow_up_date));
+    if (missingCritical) {
+      showNotice(notice, 'Each status marked critical needs a remark and a follow-up date.', 'error');
       return;
     }
 
@@ -102,26 +181,22 @@
       const res = await fetch('/api/reports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ report_date: reportDate.value, items }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not send the update.');
 
-      showNotice('Update sent to your manager.', 'success');
-      form.reset();
-      tasksWrap.innerHTML = '';
-      addTaskRow();
-      criticalFields.classList.remove('open');
+      showNotice(notice, 'Update sent to your manager.', 'success');
+      statusesWrap.innerHTML = '';
+      addStatusRow();
       reportDate.value = todayISO();
     } catch (err) {
-      showNotice(err.message, 'error');
+      showNotice(notice, err.message, 'error');
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Send update';
     }
   });
 
-  reportDate.value = todayISO();
-  addTaskRow();
-  loadStaff();
+  checkSession();
 })();

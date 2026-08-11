@@ -4,8 +4,8 @@ databases:
     postgresMajorVersion: 16
 
 services:
-  # Staff portal — its own URL, only exposes the staff-facing routes.
-  # Its build runs the schema migration once, since it happens to build first.
+  # Staff portal — its own URL. Staff log in with credentials created by
+  # their manager, then submit daily status updates.
   - type: web
     name: ticketpulse-staff
     runtime: python
@@ -17,11 +17,20 @@ services:
         fromDatabase:
           name: ticketpulse-db
           property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
       - key: PYTHON_VERSION
         value: 3.11.9
+      # Optional — set these to control the default manager account created
+      # on first deploy. If omitted, a random password is generated and
+      # printed once in this service's build logs.
+      # - key: DEFAULT_MANAGER_USERNAME
+      #   value: admin
+      # - key: DEFAULT_MANAGER_PASSWORD
+      #   value: change-me-immediately
 
-  # Manager portal — its own URL, only exposes the manager-facing routes.
-  # Shares the same database as the staff service above.
+  # Manager portal — its own URL. Shares the same database as the staff
+  # service above. Manages departments, ticket statuses, and staff accounts.
   - type: web
     name: ticketpulse-manager
     runtime: python
@@ -33,5 +42,7 @@ services:
         fromDatabase:
           name: ticketpulse-db
           property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
       - key: PYTHON_VERSION
         value: 3.11.9
