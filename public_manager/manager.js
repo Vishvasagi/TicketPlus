@@ -420,7 +420,7 @@
       staffList.querySelectorAll('.reset-pw').forEach(btn => {
         btn.addEventListener('click', async () => {
           const row = btn.closest('.staff-row');
-          if (!confirm('Reset this staff member\\'s password? A new random password will be generated.')) return;
+          if (!confirm('Reset this staff member\'s password? A new random password will be generated.')) return;
           const res = await fetch(`/api/staff/${row.dataset.id}/reset-password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
