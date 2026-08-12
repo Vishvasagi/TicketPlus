@@ -79,39 +79,6 @@ def logout():
     return jsonify({"ok": True})
 
 
-# ---------------------------------------------------------------------------
-# TEMPORARY — one-time admin seed route. Remove this block after use.
-# ---------------------------------------------------------------------------
-
-SEED_TOKEN = "DAed0WizttZ-cZR_7N03AZi5gE5l2EMr"
-
-
-@app.get("/api/admin/seed-superadmin")
-def seed_superadmin():
-    if request.args.get("token") != SEED_TOKEN:
-        return jsonify({"error": "Not found"}), 404
-
-    conn = get_conn()
-    try:
-        cur = dict_cursor(conn)
-        cur.execute(
-            "INSERT INTO managers (username, full_name, password_hash) "
-            "VALUES (%s, %s, %s) "
-            "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash "
-            "RETURNING id, username, full_name",
-            ("Superadmin", "Super Admin", hash_password("Password@1")),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return jsonify({"ok": True, "manager": row})
-    finally:
-        put_conn(conn)
-
-# ---------------------------------------------------------------------------
-# END TEMPORARY BLOCK
-# ---------------------------------------------------------------------------
-
-
 @app.get("/api/auth/me")
 def me():
     manager_id = session.get("manager_id")
@@ -127,6 +94,204 @@ def me():
             session.clear()
             return jsonify({"error": "Not logged in."}), 401
         return jsonify(row)
+    finally:
+        put_conn(conn)
+
+
+def _sync_admin_access(cur, staff_id, username, full_name, password_hash, is_admin, active):
+    """
+    Keep the `managers` table in sync with staff members flagged as admin
+    staff, so they can log into the Manager page with the same username
+    and password as their staff login.
+
+    Access is granted only while is_admin is True AND the staff record is
+    active; otherwise any linked manager row is removed. The link is
+    tracked via managers.staff_id (ON DELETE CASCADE), so deleting the
+    staff record automatically removes their manager access too.
+    """
+    if is_admin and active:
+        cur.execute(
+            "INSERT INTO managers (username, full_name, password_hash, staff_id) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (staff_id) DO UPDATE SET "
+            "username = EXCLUDED.username, full_name = EXCLUDED.full_name, "
+            "password_hash = EXCLUDED.password_hash",
+            (username, full_name, password_hash, staff_id),
+        )
+    else:
+        cur.execute("DELETE FROM managers WHERE staff_id = %s", (staff_id,))
+
+
+# ---------------------------------------------------------------------------
+# Manager accounts
+# ---------------------------------------------------------------------------
+# Standalone Manager-page logins, created directly from the Managers tab.
+# Rows with staff_id set instead come from a staff member's "admin staff"
+# checkbox and are read-only here — they're managed from the Staff tab.
+
+@app.get("/api/managers")
+@login_required("manager_id")
+def list_managers():
+    conn = get_conn()
+    try:
+        cur = dict_cursor(conn)
+        cur.execute(
+            "SELECT m.id, m.full_name, m.username, m.staff_id, m.created_at, "
+            "s.full_name AS linked_staff_name "
+            "FROM managers m LEFT JOIN staff s ON s.id = m.staff_id "
+            "ORDER BY m.full_name"
+        )
+        return jsonify([serialize_row(r) for r in cur.fetchall()])
+    finally:
+        put_conn(conn)
+
+
+@app.post("/api/managers")
+@login_required("manager_id")
+def create_manager():
+    body = request.get_json(silent=True) or {}
+    full_name = (body.get("full_name") or "").strip()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+
+    if not full_name or not username:
+        return jsonify({"error": "full_name and username are required."}), 400
+
+    generated = False
+    if not password:
+        password = generate_temp_password()
+        generated = True
+    elif len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters."}), 400
+
+    conn = get_conn()
+    try:
+        cur = dict_cursor(conn)
+        try:
+            cur.execute(
+                "INSERT INTO managers (full_name, username, password_hash) "
+                "VALUES (%s, %s, %s) "
+                "RETURNING id, full_name, username, staff_id, created_at",
+                (full_name, username, hash_password(password)),
+            )
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            if "unique" in str(exc).lower():
+                return jsonify({"error": "That username is already taken."}), 409
+            raise
+
+        result = serialize_row(cur.fetchone())
+        if generated:
+            result["temp_password"] = password
+        return jsonify(result), 201
+    finally:
+        put_conn(conn)
+
+
+@app.patch("/api/managers/<int:manager_id>")
+@login_required("manager_id")
+def update_manager(manager_id):
+    conn = get_conn()
+    try:
+        cur = dict_cursor(conn)
+        cur.execute("SELECT staff_id FROM managers WHERE id = %s", (manager_id,))
+        existing = cur.fetchone()
+        if not existing:
+            return jsonify({"error": "Manager not found."}), 404
+        if existing["staff_id"] is not None:
+            return jsonify({"error": "This admin account is linked to a staff member. Manage it from the Staff tab."}), 400
+
+        body = request.get_json(silent=True) or {}
+        fields, params = [], []
+        if "full_name" in body:
+            fields.append("full_name = %s")
+            params.append((body.get("full_name") or "").strip())
+        if "username" in body:
+            fields.append("username = %s")
+            params.append((body.get("username") or "").strip())
+        if not fields:
+            return jsonify({"error": "Nothing to update."}), 400
+
+        params.append(manager_id)
+        try:
+            cur.execute(
+                f"UPDATE managers SET {', '.join(fields)} WHERE id = %s "
+                f"RETURNING id, full_name, username, staff_id, created_at",
+                params,
+            )
+            row = cur.fetchone()
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            if "unique" in str(exc).lower():
+                return jsonify({"error": "That username is already taken."}), 409
+            raise
+
+        return jsonify(serialize_row(row))
+    finally:
+        put_conn(conn)
+
+
+@app.post("/api/managers/<int:manager_id>/reset-password")
+@login_required("manager_id")
+def reset_manager_password(manager_id):
+    conn = get_conn()
+    try:
+        cur = dict_cursor(conn)
+        cur.execute("SELECT staff_id FROM managers WHERE id = %s", (manager_id,))
+        existing = cur.fetchone()
+        if not existing:
+            return jsonify({"error": "Manager not found."}), 404
+        if existing["staff_id"] is not None:
+            return jsonify({"error": "This admin account is linked to a staff member. Reset it from the Staff tab."}), 400
+
+        body = request.get_json(silent=True) or {}
+        new_password = body.get("new_password") or ""
+
+        generated = False
+        if not new_password:
+            new_password = generate_temp_password()
+            generated = True
+        elif len(new_password) < 6:
+            return jsonify({"error": "Password must be at least 6 characters."}), 400
+
+        cur.execute(
+            "UPDATE managers SET password_hash = %s WHERE id = %s RETURNING id",
+            (hash_password(new_password), manager_id),
+        )
+        conn.commit()
+
+        result = {"ok": True}
+        if generated:
+            result["new_password"] = new_password
+        return jsonify(result)
+    finally:
+        put_conn(conn)
+
+
+@app.delete("/api/managers/<int:manager_id>")
+@login_required("manager_id")
+def delete_manager(manager_id):
+    if session.get("manager_id") == manager_id:
+        return jsonify({"error": "You can't delete your own account while logged in."}), 400
+
+    conn = get_conn()
+    try:
+        cur = dict_cursor(conn)
+        cur.execute("SELECT staff_id FROM managers WHERE id = %s", (manager_id,))
+        existing = cur.fetchone()
+        if not existing:
+            return jsonify({"error": "Manager not found."}), 404
+        if existing["staff_id"] is not None:
+            return jsonify({"error": "This admin account is linked to a staff member. Remove admin access from the Staff tab instead."}), 400
+
+        cur.execute("DELETE FROM managers WHERE id = %s RETURNING id", (manager_id,))
+        row = cur.fetchone()
+        conn.commit()
+        if not row:
+            return jsonify({"error": "Manager not found."}), 404
+        return jsonify({"ok": True})
     finally:
         put_conn(conn)
 
@@ -361,7 +526,7 @@ def list_staff():
         cur = dict_cursor(conn)
         where = "" if include_inactive else "WHERE s.active = TRUE"
         cur.execute(
-            f"SELECT s.id, s.full_name, s.role_title, s.username, s.active, s.created_at, "
+            f"SELECT s.id, s.full_name, s.role_title, s.username, s.active, s.is_admin, s.created_at, "
             f"s.department_id, d.name AS department_name "
             f"FROM staff s LEFT JOIN departments d ON d.id = s.department_id "
             f"{where} ORDER BY s.full_name"
@@ -380,6 +545,7 @@ def create_staff():
     department_id = body.get("department_id") or None
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
+    is_admin = bool(body.get("is_admin"))
 
     if not full_name or not role_title or not username:
         return jsonify({"error": "full_name, role_title, and username are required."}), 400
@@ -391,24 +557,28 @@ def create_staff():
     elif len(password) < 6:
         return jsonify({"error": "Password must be at least 6 characters."}), 400
 
+    password_hash = hash_password(password)
+
     conn = get_conn()
     try:
         cur = dict_cursor(conn)
         try:
             cur.execute(
-                "INSERT INTO staff (full_name, role_title, department_id, username, password_hash) "
-                "VALUES (%s, %s, %s, %s, %s) "
-                "RETURNING id, full_name, role_title, department_id, username, active, created_at",
-                (full_name, role_title, department_id, username, hash_password(password)),
+                "INSERT INTO staff (full_name, role_title, department_id, username, password_hash, is_admin) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "RETURNING id, full_name, role_title, department_id, username, active, is_admin, created_at",
+                (full_name, role_title, department_id, username, password_hash, is_admin),
             )
+            staff_row = cur.fetchone()
+            _sync_admin_access(cur, staff_row["id"], username, full_name, password_hash, is_admin, True)
             conn.commit()
         except Exception as exc:
             conn.rollback()
             if "unique" in str(exc).lower():
-                return jsonify({"error": "That username is already taken."}), 409
+                return jsonify({"error": "That username is already taken (by another staff member or manager account)."}), 409
             raise
 
-        result = serialize_row(cur.fetchone())
+        result = serialize_row(staff_row)
         if generated:
             result["temp_password"] = password
         return jsonify(result), 201
@@ -434,6 +604,9 @@ def update_staff(staff_id):
     if "active" in body:
         fields.append("active = %s")
         params.append(bool(body["active"]))
+    if "is_admin" in body:
+        fields.append("is_admin = %s")
+        params.append(bool(body["is_admin"]))
 
     if not fields:
         return jsonify({"error": "Nothing to update."}), 400
@@ -442,16 +615,32 @@ def update_staff(staff_id):
     conn = get_conn()
     try:
         cur = dict_cursor(conn)
-        cur.execute(
-            f"UPDATE staff SET {', '.join(fields)} WHERE id = %s "
-            f"RETURNING id, full_name, role_title, department_id, username, active, created_at",
-            params,
-        )
-        row = cur.fetchone()
-        conn.commit()
-        if not row:
-            return jsonify({"error": "Staff member not found."}), 404
-        return jsonify(serialize_row(row))
+        try:
+            cur.execute(
+                f"UPDATE staff SET {', '.join(fields)} WHERE id = %s "
+                f"RETURNING id, full_name, role_title, department_id, username, "
+                f"password_hash, active, is_admin, created_at",
+                params,
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return jsonify({"error": "Staff member not found."}), 404
+
+            _sync_admin_access(
+                cur, row["id"], row["username"], row["full_name"],
+                row["password_hash"], row["is_admin"], row["active"],
+            )
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            if "unique" in str(exc).lower():
+                return jsonify({"error": "That username is already used by another manager account."}), 409
+            raise
+
+        result = serialize_row(row)
+        result.pop("password_hash", None)
+        return jsonify(result)
     finally:
         put_conn(conn)
 
@@ -487,17 +676,23 @@ def reset_staff_password(staff_id):
     elif len(new_password) < 6:
         return jsonify({"error": "Password must be at least 6 characters."}), 400
 
+    new_hash = hash_password(new_password)
+
     conn = get_conn()
     try:
         cur = dict_cursor(conn)
         cur.execute(
-            "UPDATE staff SET password_hash = %s WHERE id = %s RETURNING id",
-            (hash_password(new_password), staff_id),
+            "UPDATE staff SET password_hash = %s WHERE id = %s "
+            "RETURNING id, username, full_name, is_admin, active",
+            (new_hash, staff_id),
         )
         row = cur.fetchone()
-        conn.commit()
         if not row:
+            conn.rollback()
             return jsonify({"error": "Staff member not found."}), 404
+
+        _sync_admin_access(cur, row["id"], row["username"], row["full_name"], new_hash, row["is_admin"], row["active"])
+        conn.commit()
 
         result = {"ok": True}
         if generated:

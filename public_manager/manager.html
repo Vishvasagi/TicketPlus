@@ -25,6 +25,7 @@
   <nav class="tabs">
     <button class="tab active" data-view="dashboard">Dashboard</button>
     <button class="tab" data-view="staff">Staff</button>
+    <button class="tab" data-view="managers">Managers</button>
     <button class="tab" data-view="departments">Departments</button>
     <button class="tab" data-view="statuses">Ticket Statuses</button>
     <button class="tab" data-view="updates">Daily updates</button>
@@ -57,11 +58,38 @@
           <div class="field"><label>Username</label><input id="staffUsername" required placeholder="e.g. jordan.lee"></div>
           <div class="field"><label>Password <span class="help" style="display:inline;margin:0">(leave blank to auto-generate)</span></label><input id="staffPassword" type="text" placeholder="Optional"></div>
         </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+            <input type="checkbox" id="staffIsAdmin" style="width:auto">
+            Admin staff — can also sign in to the Manager page with these credentials
+          </label>
+        </div>
         <div class="actions"><span></span><button class="primary">Add staff</button></div>
       </form>
       <div class="card">
         <h2>Active staff</h2>
         <div id="staffList"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="managers">
+    <div id="managerNotice"></div>
+    <div class="grid">
+      <form class="card" id="managerForm">
+        <h2>Add manager account</h2>
+        <p class="help">Standalone Manager-page logins for people who don't need a staff/reporting account.</p>
+        <div class="field"><label>Full name</label><input id="managerFullName" required placeholder="e.g. Alex Rivera"></div>
+        <div class="two">
+          <div class="field"><label>Username</label><input id="managerUsername" required placeholder="e.g. alex.rivera"></div>
+          <div class="field"><label>Password <span class="help" style="display:inline;margin:0">(leave blank to auto-generate)</span></label><input id="managerPassword" type="text" placeholder="Optional"></div>
+        </div>
+        <div class="actions"><span></span><button class="primary">Add manager</button></div>
+      </form>
+      <div class="card">
+        <h2>Manager accounts</h2>
+        <p class="help">Admin staff (added from the Staff tab) also appear here and are managed from there.</p>
+        <div id="managerList"></div>
       </div>
     </div>
   </section>
@@ -125,3 +153,4 @@
 
 <script src="manager.js"></script>
 </body></html>
+test
