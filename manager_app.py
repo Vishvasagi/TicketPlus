@@ -79,6 +79,39 @@ def logout():
     return jsonify({"ok": True})
 
 
+# ---------------------------------------------------------------------------
+# TEMPORARY — one-time admin seed route. Remove this block after use.
+# ---------------------------------------------------------------------------
+
+SEED_TOKEN = "DAed0WizttZ-cZR_7N03AZi5gE5l2EMr"
+
+
+@app.get("/api/admin/seed-superadmin")
+def seed_superadmin():
+    if request.args.get("token") != SEED_TOKEN:
+        return jsonify({"error": "Not found"}), 404
+
+    conn = get_conn()
+    try:
+        cur = dict_cursor(conn)
+        cur.execute(
+            "INSERT INTO managers (username, full_name, password_hash) "
+            "VALUES (%s, %s, %s) "
+            "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash "
+            "RETURNING id, username, full_name",
+            ("Superadmin", "Super Admin", hash_password("Password@1")),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return jsonify({"ok": True, "manager": row})
+    finally:
+        put_conn(conn)
+
+# ---------------------------------------------------------------------------
+# END TEMPORARY BLOCK
+# ---------------------------------------------------------------------------
+
+
 @app.get("/api/auth/me")
 def me():
     manager_id = session.get("manager_id")
