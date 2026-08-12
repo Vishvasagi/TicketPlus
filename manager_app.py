@@ -29,6 +29,37 @@ app.config.update(
 
 
 # ---------------------------------------------------------------------------
+# Startup migrations
+# ---------------------------------------------------------------------------
+# Applies the admin-staff schema patch automatically at boot, so no manual
+# psql/database console access is ever needed. Each statement uses
+# IF NOT EXISTS and is a no-op once already applied, so it's safe to leave
+# this running on every future deploy.
+
+def _run_startup_migrations():
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "ALTER TABLE staff ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        cur.execute(
+            "ALTER TABLE managers ADD COLUMN IF NOT EXISTS staff_id "
+            "BIGINT UNIQUE REFERENCES staff(id) ON DELETE CASCADE"
+        )
+        conn.commit()
+        print("[startup migration] admin-staff schema patch applied (or already present).")
+    except Exception as exc:
+        conn.rollback()
+        print(f"[startup migration] skipped due to error: {exc}")
+    finally:
+        put_conn(conn)
+
+
+_run_startup_migrations()
+
+
+# ---------------------------------------------------------------------------
 # Static front end
 # ---------------------------------------------------------------------------
 
