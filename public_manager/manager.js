@@ -20,6 +20,15 @@
   const staffDepartment = document.getElementById('staffDepartment');
   const staffUsername = document.getElementById('staffUsername');
   const staffPassword = document.getElementById('staffPassword');
+  const staffIsAdmin = document.getElementById('staffIsAdmin');
+
+  // Manager accounts
+  const managerNotice = document.getElementById('managerNotice');
+  const managerForm = document.getElementById('managerForm');
+  const managerFullName = document.getElementById('managerFullName');
+  const managerUsername = document.getElementById('managerUsername');
+  const managerPassword = document.getElementById('managerPassword');
+  const managerList = document.getElementById('managerList');
 
   // Departments
   const deptNotice = document.getElementById('deptNotice');
@@ -137,6 +146,7 @@
 
       if (tab.dataset.view === 'dashboard') loadDashboard();
       if (tab.dataset.view === 'staff') { loadDepartmentsInto(staffDepartment, false); loadStaffAdmin(); }
+      if (tab.dataset.view === 'managers') loadManagers();
       if (tab.dataset.view === 'departments') loadDepartments();
       if (tab.dataset.view === 'statuses') loadStatuses();
       if (tab.dataset.view === 'updates') loadUpdates();
@@ -345,6 +355,7 @@
           department_id: staffDepartment.value || null,
           username: staffUsername.value.trim(),
           password: staffPassword.value,
+          is_admin: staffIsAdmin.checked,
         }),
       });
       const data = await res.json();
@@ -367,6 +378,23 @@
       departmentsCache.map(d => `<option value="${d.id}" ${String(d.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
   }
 
+  function staffRowHtml(s) {
+    return `
+        <div class="staff-row" data-id="${s.id}" data-dept="${s.department_id || ''}">
+          <div>
+            <div class="name">${escapeHtml(s.full_name)} ${!s.active ? '<span class="role">(inactive)</span>' : ''}</div>
+            <div class="role">${escapeHtml(s.role_title)}${s.department_name ? ' · ' + escapeHtml(s.department_name) : ''} · @${escapeHtml(s.username)}${s.is_admin ? ' · <b>Admin</b>' : ''}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="deactivate edit-staff" type="button">Edit</button>
+            <button class="deactivate reset-pw" type="button">Reset password</button>
+            <button class="deactivate toggle-active" type="button">${s.active ? 'Deactivate' : 'Activate'}</button>
+            <button class="deactivate delete-staff" type="button">Delete</button>
+          </div>
+        </div>
+      `;
+  }
+
   async function loadStaffAdmin() {
     try {
       const res = await fetch('/api/staff?all=1');
@@ -378,20 +406,20 @@
         return;
       }
 
-      staffList.innerHTML = staff.map(s => `
-        <div class="staff-row" data-id="${s.id}" data-dept="${s.department_id || ''}">
-          <div>
-            <div class="name">${escapeHtml(s.full_name)} ${!s.active ? '<span class="role">(inactive)</span>' : ''}</div>
-            <div class="role">${escapeHtml(s.role_title)}${s.department_name ? ' · ' + escapeHtml(s.department_name) : ''} · @${escapeHtml(s.username)}</div>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-            <button class="deactivate edit-staff" type="button">Edit</button>
-            <button class="deactivate reset-pw" type="button">Reset password</button>
-            <button class="deactivate toggle-active" type="button">${s.active ? 'Deactivate' : 'Activate'}</button>
-            <button class="deactivate delete-staff" type="button">Delete</button>
-          </div>
+      const adminStaff = staff.filter(s => s.is_admin);
+      const regularStaff = staff.filter(s => !s.is_admin);
+
+      const groupLabel = (text, count) => `
+        <div class="help" style="margin:${text === 'Manager page access' ? '0' : '18px'} 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">
+          ${text} (${count})
         </div>
-      `).join('');
+      `;
+
+      staffList.innerHTML =
+        groupLabel('Manager page access', adminStaff.length) +
+        (adminStaff.length ? adminStaff.map(staffRowHtml).join('') : '<div class="empty">No staff with Manager page access.</div>') +
+        groupLabel('Staff portal only', regularStaff.length) +
+        (regularStaff.length ? regularStaff.map(staffRowHtml).join('') : '<div class="empty">No staff-only members.</div>');
 
       staffList.querySelectorAll('.toggle-active').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -448,6 +476,12 @@
           <div class="field"><label>Team / role</label><input class="edit-role" value="${escapeHtml(s.role_title)}"></div>
         </div>
         <div class="field"><label>Department</label><select class="edit-dept">${departmentOptionsHtml(s.department_id)}</select></div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:normal">
+            <input type="checkbox" class="edit-is-admin" ${s.is_admin ? 'checked' : ''} style="width:auto">
+            Admin staff — can also sign in to the Manager page with these credentials
+          </label>
+        </div>
         <div class="actions">
           <button type="button" class="outline cancel-edit">Cancel</button>
           <button type="button" class="primary save-edit">Save</button>
@@ -460,6 +494,7 @@
         full_name: row.querySelector('.edit-name').value.trim(),
         role_title: row.querySelector('.edit-role').value.trim(),
         department_id: row.querySelector('.edit-dept').value || null,
+        is_admin: row.querySelector('.edit-is-admin').checked,
       };
       const res = await fetch(`/api/staff/${row.dataset.id}`, {
         method: 'PATCH',
@@ -470,6 +505,125 @@
       if (!res.ok) { showNotice(staffNotice, data.error || 'Could not save changes.', 'error'); return; }
       showNotice(staffNotice, `${data.full_name} was updated.`, 'success');
       loadStaffAdmin();
+    });
+  }
+
+  // ---------------- Manager accounts ----------------
+
+  managerForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    managerNotice.innerHTML = '';
+    const btn = managerForm.querySelector('.primary');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/managers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: managerFullName.value.trim(),
+          username: managerUsername.value.trim(),
+          password: managerPassword.value,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add this manager.');
+
+      let msg = `${data.full_name} was added.`;
+      if (data.temp_password) msg += ` Auto-generated password: ${data.temp_password} — share this with them securely.`;
+      showNotice(managerNotice, msg, 'success');
+      managerForm.reset();
+      loadManagers();
+    } catch (err) {
+      showNotice(managerNotice, err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function loadManagers() {
+    try {
+      const res = await fetch('/api/managers');
+      if (!res.ok) throw new Error();
+      const managers = await res.json();
+
+      managerList.innerHTML = managers.length ? managers.map(m => `
+        <div class="staff-row" data-id="${m.id}">
+          <div>
+            <div class="name">${escapeHtml(m.full_name)}</div>
+            <div class="role">@${escapeHtml(m.username)}${m.linked_staff_name ? ` · Linked to staff: ${escapeHtml(m.linked_staff_name)}` : ''}</div>
+          </div>
+          ${m.staff_id ? '<div class="help" style="margin:0">Manage from Staff tab</div>' : `
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="deactivate edit-manager" type="button">Edit</button>
+            <button class="deactivate reset-manager-pw" type="button">Reset password</button>
+            <button class="deactivate delete-manager" type="button">Delete</button>
+          </div>
+          `}
+        </div>
+      `).join('') : '<div class="empty">No manager accounts yet. Add the first one.</div>';
+
+      managerList.querySelectorAll('.delete-manager').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const row = btn.closest('.staff-row');
+          if (!confirm('Delete this manager account? They will no longer be able to sign in to the Manager page.')) return;
+          const res = await fetch(`/api/managers/${row.dataset.id}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (!res.ok) { showNotice(managerNotice, data.error || 'Could not delete.', 'error'); return; }
+          loadManagers();
+        });
+      });
+
+      managerList.querySelectorAll('.reset-manager-pw').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const row = btn.closest('.staff-row');
+          if (!confirm('Reset this manager\'s password? A new random password will be generated.')) return;
+          const res = await fetch(`/api/managers/${row.dataset.id}/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          const data = await res.json();
+          if (!res.ok) { showNotice(managerNotice, data.error || 'Could not reset password.', 'error'); return; }
+          showNotice(managerNotice, `New password: ${data.new_password} — share this with them securely.`, 'success');
+        });
+      });
+
+      managerList.querySelectorAll('.edit-manager').forEach(btn => {
+        btn.addEventListener('click', () => openEditManagerRow(btn.closest('.staff-row'), managers.find(m => String(m.id) === btn.closest('.staff-row').dataset.id)));
+      });
+    } catch {
+      managerList.innerHTML = '<div class="empty">Could not load manager accounts. Refresh to try again.</div>';
+    }
+  }
+
+  function openEditManagerRow(row, m) {
+    row.innerHTML = `
+      <div style="width:100%">
+        <div class="two">
+          <div class="field"><label>Full name</label><input class="edit-mgr-name" value="${escapeHtml(m.full_name)}"></div>
+          <div class="field"><label>Username</label><input class="edit-mgr-username" value="${escapeHtml(m.username)}"></div>
+        </div>
+        <div class="actions">
+          <button type="button" class="outline cancel-mgr-edit">Cancel</button>
+          <button type="button" class="primary save-mgr-edit">Save</button>
+        </div>
+      </div>
+    `;
+    row.querySelector('.cancel-mgr-edit').addEventListener('click', () => loadManagers());
+    row.querySelector('.save-mgr-edit').addEventListener('click', async () => {
+      const body = {
+        full_name: row.querySelector('.edit-mgr-name').value.trim(),
+        username: row.querySelector('.edit-mgr-username').value.trim(),
+      };
+      const res = await fetch(`/api/managers/${row.dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { showNotice(managerNotice, data.error || 'Could not save changes.', 'error'); return; }
+      showNotice(managerNotice, `${data.full_name} was updated.`, 'success');
+      loadManagers();
     });
   }
 

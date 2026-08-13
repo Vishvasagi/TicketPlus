@@ -601,6 +601,7 @@ def create_staff():
                 (full_name, role_title, department_id, username, password_hash, is_admin),
             )
             staff_row = cur.fetchone()
+            print(f"[create_staff] id={staff_row['id']} username={username!r} is_admin={is_admin}")
             _sync_admin_access(cur, staff_row["id"], username, full_name, password_hash, is_admin, True)
             conn.commit()
         except Exception as exc:
@@ -658,6 +659,7 @@ def update_staff(staff_id):
                 conn.rollback()
                 return jsonify({"error": "Staff member not found."}), 404
 
+            print(f"[update_staff] id={row['id']} username={row['username']!r} is_admin={row['is_admin']} active={row['active']}")
             _sync_admin_access(
                 cur, row["id"], row["username"], row["full_name"],
                 row["password_hash"], row["is_admin"], row["active"],
@@ -722,6 +724,7 @@ def reset_staff_password(staff_id):
             conn.rollback()
             return jsonify({"error": "Staff member not found."}), 404
 
+        print(f"[reset_staff_password] id={row['id']} username={row['username']!r} is_admin={row['is_admin']} active={row['active']}")
         _sync_admin_access(cur, row["id"], row["username"], row["full_name"], new_hash, row["is_admin"], row["active"])
         conn.commit()
 
