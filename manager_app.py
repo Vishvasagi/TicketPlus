@@ -166,13 +166,18 @@ def list_managers():
     conn = get_conn()
     try:
         cur = dict_cursor(conn)
-        cur.execute(
-            "SELECT m.id, m.full_name, m.username, m.staff_id, m.created_at, "
-            "s.full_name AS linked_staff_name "
-            "FROM managers m LEFT JOIN staff s ON s.id = m.staff_id "
-            "ORDER BY m.full_name"
-        )
-        return jsonify([serialize_row(r) for r in cur.fetchall()])
+        try:
+            cur.execute(
+                "SELECT m.id, m.full_name, m.username, m.staff_id, m.created_at, "
+                "s.full_name AS linked_staff_name "
+                "FROM managers m LEFT JOIN staff s ON s.id = m.staff_id "
+                "ORDER BY m.full_name"
+            )
+            rows = cur.fetchall()
+        except Exception as exc:
+            print(f"[list_managers] query failed: {exc}")
+            raise
+        return jsonify([serialize_row(r) for r in rows])
     finally:
         put_conn(conn)
 

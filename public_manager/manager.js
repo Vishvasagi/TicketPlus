@@ -540,13 +540,8 @@
     }
   });
 
-  async function loadManagers() {
-    try {
-      const res = await fetch('/api/managers');
-      if (!res.ok) throw new Error();
-      const managers = await res.json();
-
-      managerList.innerHTML = managers.length ? managers.map(m => `
+  function managerRowHtml(m) {
+    return `
         <div class="staff-row" data-id="${m.id}">
           <div>
             <div class="name">${escapeHtml(m.full_name)}</div>
@@ -560,7 +555,37 @@
           </div>
           `}
         </div>
-      `).join('') : '<div class="empty">No manager accounts yet. Add the first one.</div>';
+      `;
+  }
+
+  async function loadManagers() {
+    try {
+      const res = await fetch('/api/managers');
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Request failed (${res.status})`);
+      }
+      const managers = await res.json();
+
+      if (managers.length === 0) {
+        managerList.innerHTML = '<div class="empty">No manager accounts yet. Add the first one.</div>';
+        return;
+      }
+
+      const fromStaff = managers.filter(m => m.staff_id);
+      const standalone = managers.filter(m => !m.staff_id);
+
+      const groupLabel = (text, count, first) => `
+        <div class="help" style="margin:${first ? '0' : '18px'} 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">
+          ${text} (${count})
+        </div>
+      `;
+
+      managerList.innerHTML =
+        groupLabel('Admin staff (from Staff tab)', fromStaff.length, true) +
+        (fromStaff.length ? fromStaff.map(managerRowHtml).join('') : '<div class="empty">No staff currently have Manager page access.</div>') +
+        groupLabel('Standalone manager accounts', standalone.length, false) +
+        (standalone.length ? standalone.map(managerRowHtml).join('') : '<div class="empty">No standalone manager accounts yet.</div>');
 
       managerList.querySelectorAll('.delete-manager').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -591,8 +616,9 @@
       managerList.querySelectorAll('.edit-manager').forEach(btn => {
         btn.addEventListener('click', () => openEditManagerRow(btn.closest('.staff-row'), managers.find(m => String(m.id) === btn.closest('.staff-row').dataset.id)));
       });
-    } catch {
-      managerList.innerHTML = '<div class="empty">Could not load manager accounts. Refresh to try again.</div>';
+    } catch (err) {
+      console.error('loadManagers failed:', err);
+      managerList.innerHTML = `<div class="empty">Could not load manager accounts: ${escapeHtml(err.message || 'unknown error')}. Refresh to try again.</div>`;
     }
   }
 
