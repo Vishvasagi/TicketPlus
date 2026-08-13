@@ -327,6 +327,41 @@ def delete_manager(manager_id):
         put_conn(conn)
 
 
+# ---------------------------------------------------------------------------
+# TEMPORARY — one-time schema migration route. Remove this block after use.
+# Adds staff.is_admin and managers.staff_id to an existing database that
+# doesn't have them yet (needed for the admin-staff feature).
+# ---------------------------------------------------------------------------
+
+MIGRATION_TOKEN = "4nEuEuhwY-cm8kZZSYzCZmTcST6HSbpF"
+
+
+@app.get("/api/admin/run-migration")
+def run_admin_staff_migration():
+    if request.args.get("token") != MIGRATION_TOKEN:
+        return jsonify({"error": "Not found"}), 404
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE staff ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;")
+        cur.execute(
+            "ALTER TABLE managers ADD COLUMN IF NOT EXISTS staff_id BIGINT UNIQUE "
+            "REFERENCES staff(id) ON DELETE CASCADE;"
+        )
+        conn.commit()
+        return jsonify({"ok": True, "message": "Migration applied: staff.is_admin and managers.staff_id are ready."})
+    except Exception as exc:
+        conn.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        put_conn(conn)
+
+# ---------------------------------------------------------------------------
+# END TEMPORARY BLOCK
+# ---------------------------------------------------------------------------
+
+
 @app.post("/api/auth/change-password")
 @login_required("manager_id")
 def change_password():
